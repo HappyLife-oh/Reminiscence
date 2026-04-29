@@ -11,12 +11,14 @@ from models.data_models import MessagePlatform
 from services.data_parser import auto_parse, get_parser
 from services.feature_extractor import FeatureExtractor
 from services.character_service import CharacterService
+from services.memory_service import MemoryService
 
 router = APIRouter()
 
 # 初始化服务
 feature_extractor = FeatureExtractor()
 character_service = CharacterService()
+memory_service = MemoryService()
 
 
 class PasteImportRequest(BaseModel):
@@ -74,6 +76,9 @@ async def import_text(
 
         # 保存消息
         character_service.save_messages(character_id, messages)
+
+        # 添加到记忆系统（RAG）
+        memory_count = memory_service.add_messages(character_id, messages)
 
         # 生成并保存系统提示词
         system_prompt = feature_extractor.generate_system_prompt(profile)
@@ -150,6 +155,10 @@ async def import_file(
         # 保存
         character_id = character_service.save_character(profile)
         character_service.save_messages(character_id, messages)
+        
+        # 添加到记忆系统（RAG）
+        memory_service.add_messages(character_id, messages)
+        
         system_prompt = feature_extractor.generate_system_prompt(profile)
         character_service.save_system_prompt(character_id, system_prompt)
 
@@ -202,7 +211,10 @@ async def get_character_prompt(character_id: str):
 
 @router.delete("/characters/{character_id}")
 async def delete_character(character_id: str):
-    """删除人物"""
+    """删除人物（包括记忆数据）"""
+    # 删除记忆数据
+    memory_service.delete_memories(character_id)
+    # 删除人物档案
     success = character_service.delete_character(character_id)
     if not success:
         raise HTTPException(status_code=404, detail="人物不存在")
