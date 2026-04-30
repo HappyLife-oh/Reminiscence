@@ -12,6 +12,7 @@ from services.data_parser import auto_parse, get_parser
 from services.feature_extractor import FeatureExtractor
 from services.character_service import CharacterService
 from services.memory_service import MemoryService
+from services.prompt_service import PromptService
 
 router = APIRouter()
 
@@ -19,6 +20,7 @@ router = APIRouter()
 feature_extractor = FeatureExtractor()
 character_service = CharacterService()
 memory_service = MemoryService()
+prompt_service = PromptService()
 
 
 class PasteImportRequest(BaseModel):
@@ -80,8 +82,8 @@ async def import_text(
         # 添加到记忆系统（RAG）
         memory_count = memory_service.add_messages(character_id, messages)
 
-        # 生成并保存系统提示词
-        system_prompt = feature_extractor.generate_system_prompt(profile)
+        # 生成并保存系统提示词（使用优化的PromptService）
+        system_prompt = prompt_service.generate_system_prompt(profile)
         character_service.save_system_prompt(character_id, system_prompt)
 
         return {
@@ -159,7 +161,7 @@ async def import_file(
         # 添加到记忆系统（RAG）
         memory_service.add_messages(character_id, messages)
         
-        system_prompt = feature_extractor.generate_system_prompt(profile)
+        system_prompt = prompt_service.generate_system_prompt(profile)
         character_service.save_system_prompt(character_id, system_prompt)
 
         return {

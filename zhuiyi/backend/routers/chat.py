@@ -1,6 +1,6 @@
 """
 聊天路由 - 处理对话请求
-支持人物档案关联和RAG记忆检索
+支持人物档案关联、RAG记忆检索和Prompt工程优化
 """
 
 from fastapi import APIRouter, Request
@@ -11,12 +11,14 @@ import json
 
 from services.character_service import CharacterService
 from services.memory_service import MemoryService
+from services.prompt_service import PromptService
 
 router = APIRouter()
 
 # 初始化服务
 character_service = CharacterService()
 memory_service = MemoryService()
+prompt_service = PromptService()
 
 
 class Message(BaseModel):
@@ -48,15 +50,23 @@ def _build_messages_with_character(
     messages: List[Message],
     character_id: Optional[str],
 ) -> List[dict]:
-    """如果指定了人物ID，注入系统提示词和RAG记忆"""
+    """如果指定了人物ID，注入优化后的系统提示词、RAG记忆和情感状态"""
     result = []
 
     if character_id:
-        system_prompt = character_service.load_system_prompt(character_id)
-        if system_prompt:
-            # 获取当前用户消息用于RAG检索
+        # 加载人物档案
+        profile = character_service.load_character(character_id)
+
+        if profile:
+            # 获取当前用户消息
             user_messages = [m for m in messages if m.role == "user"]
             current_query = user_messages[-1].content if user_messages else ""
+
+            # 分析用户情感
+            emotion = prompt_service.analyze_emotion(current_query)
+
+            # 获取时间上下文
+            time_context = prompt_service.get_time_context()
 
             # 检索相关记忆
             context_memories = memory_service.get_context_memories(
@@ -66,11 +76,37 @@ def _build_messages_with_character(
                 top_k=3,
             )
 
-            # 将记忆注入系统提示词
+            # 使用PromptService生成优化的系统提示词
+            system_prompt = prompt_service.generate_system_prompt(
+                profile=profile,
+                emotion_state=emotion,
+            )
+
+            # 注入RAG记忆
             if context_memories:
                 system_prompt += f"\n\n# 相关记忆\n{context_memories}"
 
+            # 注入时间上下文
+            if time_context:
+                system_prompt += f"\n\n# 时间提示\n{time_context}"
+
             result.append({"role": "system", "content": system_prompt})
+        else:
+            # 降级：使用旧的系统提示词
+            system_prompt = character_service.load_system_prompt(character_id)
+            if system_prompt:
+                # 仍然注入RAG记忆
+                user_messages = [m for m in messages if m.role == "user"]
+                current_query = user_messages[-1].content if user_messages else ""
+                context_memories = memory_service.get_context_memories(
+                    character_id=character_id,
+                    current_message=current_query,
+                    recent_messages=[],
+                    top_k=3,
+                )
+                if context_memories:
+                    system_prompt += f"\n\n# 相关记忆\n{context_memories}"
+                result.append({"role": "system", "content": system_prompt})
 
     for msg in messages:
         result.append(msg.model_dump())
@@ -82,11 +118,11 @@ def _build_messages_with_character(
 async def chat_completions(request: Request, chat_request: ChatRequest):
     """
     聊天补全接口
-    支持流式和非流式响应，支持人物档案关联和RAG记忆
+    支持流式和非流式响应，支持人物档案关联、RAG记忆和Prompt优化
     """
     llm_service = request.app.state.llm_service
 
-    # 构建消息列表（注入人物系统提示词和RAG记忆）
+    # 构建消息列表（注入优化的系统提示词）
     api_messages = _build_messages_with_character(
         chat_request.messages,
         chat_request.character_id,
