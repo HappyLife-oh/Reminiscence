@@ -9,7 +9,6 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "title": "追忆 - 赛博永生",
     "windows": [
       {
         "title": "追忆 - 赛博永生",
