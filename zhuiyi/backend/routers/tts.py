@@ -2,14 +2,17 @@
 TTS路由 - 语音合成API
 """
 
+import logging
+import os
+import tempfile
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
-import os
 
 from services.tts_service import TTSService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -20,10 +23,21 @@ class TTSRequest(BaseModel):
     speed: Optional[float] = 1.0
     model: Optional[str] = "tts"
 
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, v):
+        if not v or not v.strip():
+            raise ValueError("text不能为空")
+        if len(v) > 5000:
+            raise ValueError("text长度不能超过5000字符")
+        return v
 
-class VoiceCloneRequest(BaseModel):
-    """声音克隆请求"""
-    text: str
+    @field_validator("speed")
+    @classmethod
+    def validate_speed(cls, v):
+        if v is not None and (v < 0.5 or v > 2.0):
+            raise ValueError("speed必须在0.5-2.0之间")
+        return v
 
 
 @router.post("/synthesize")
@@ -42,8 +56,11 @@ async def synthesize_speech(request: Request, tts_request: TTSRequest):
             media_type="audio/mpeg",
             filename="speech.mp3",
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"TTS合成失败: {e}")
+        raise HTTPException(status_code=500, detail="语音合成失败，请稍后重试")
 
 
 @router.post("/voice-clone")
@@ -53,35 +70,51 @@ async def voice_clone(
     text: str = Form(...),
 ):
     """声音克隆"""
+    if not text or not text.strip():
+        raise HTTPException(status_code=400, detail="text不能为空")
+    if len(text) > 5000:
+        raise HTTPException(status_code=400, detail="text长度不能超过5000字符")
+
+    # 检查音频文件大小（最大10MB）
+    content = await audio.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="音频文件大小不能超过10MB")
+
+    tmp_path = None
     try:
         tts_service = TTSService(request.app.state.config_service)
 
-        # 保存上传的参考音频
-        import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
-            content = await audio.read()
             tmp.write(content)
             tmp_path = tmp.name
 
-        try:
-            audio_path = await tts_service.voice_clone(
-                reference_audio_path=tmp_path,
-                text=text,
-            )
-            return FileResponse(
-                audio_path,
-                media_type="audio/mpeg",
-                filename="cloned_speech.mp3",
-            )
-        finally:
-            os.unlink(tmp_path)
+        audio_path = await tts_service.voice_clone(
+            reference_audio_path=tmp_path,
+            text=text,
+        )
+        return FileResponse(
+            audio_path,
+            media_type="audio/mpeg",
+            filename="cloned_speech.mp3",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"声音克隆失败: {e}")
+        raise HTTPException(status_code=500, detail="声音克隆失败，请稍后重试")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 @router.post("/voice-design")
 async def voice_design(request: Request, description: str = Form(...)):
     """声音设计"""
+    if not description or not description.strip():
+        raise HTTPException(status_code=400, detail="description不能为空")
+    if len(description) > 1000:
+        raise HTTPException(status_code=400, detail="description长度不能超过1000字符")
+
     try:
         tts_service = TTSService(request.app.state.config_service)
         audio_path = await tts_service.voice_design(description=description)
@@ -90,8 +123,11 @@ async def voice_design(request: Request, description: str = Form(...)):
             media_type="audio/mpeg",
             filename="designed_voice.mp3",
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"声音设计失败: {e}")
+        raise HTTPException(status_code=500, detail="声音设计失败，请稍后重试")
 
 
 @router.get("/models")
