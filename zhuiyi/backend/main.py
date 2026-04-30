@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from routers import chat, config as config_router, data_import
+from routers import chat, config as config_router, data_import, tts
 from services.llm_service import LLMService
 from services.config_service import ConfigService
 
@@ -46,6 +46,7 @@ app.add_middleware(
 app.include_router(chat.router, prefix="/api/chat", tags=["聊天"])
 app.include_router(config_router.router, prefix="/api/config", tags=["配置"])
 app.include_router(data_import.router, prefix="/api/data", tags=["数据导入"])
+app.include_router(tts.router, prefix="/api/tts", tags=["语音合成"])
 
 
 @app.get("/")
