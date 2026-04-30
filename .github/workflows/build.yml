@@ -1,0 +1,86 @@
+name: Build Windows Installer
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust dependencies
+        run: |
+          rustup target add x86_64-pc-windows-msvc
+
+      - name: Cache npm packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('zhuiyi/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-${{ hashFiles('zhuiyi/backend/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install frontend dependencies
+        working-directory: zhuiyi
+        run: npm ci
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r zhuiyi/backend/requirements.txt
+          pip install pyinstaller
+
+      - name: Build Python backend
+        run: |
+          cd zhuiyi/backend
+          pyinstaller --onefile --name zhuiyi-backend --add-data ".env.example;." --hidden-import uvicorn --hidden-import uvicorn.logging --hidden-import uvicorn.loops --hidden-import uvicorn.loops.auto --hidden-import uvicorn.protocols --hidden-import uvicorn.protocols.http --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets --hidden-import uvicorn.protocols.websockets.auto --hidden-import uvicorn.lifespan --hidden-import uvicorn.lifespan.on main.py
+
+      - name: Copy backend to Tauri
+        run: |
+          mkdir -p zhuiyi/src-tauri/binaries
+          copy zhuiyi/backend/dist/zhuiyi-backend.exe zhuiyi/src-tauri/binaries/zhuiyi-backend.exe
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: zhuiyi
+          tagName: v__VERSION__
+          releaseName: '追忆 v__VERSION__'
+          releaseBody: '追忆 - AI数字人系统'
+          releaseDraft: false
+          prerelease: false
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zhuiyi-installer
+          path: |
+            zhuiyi/src-tauri/target/release/bundle/msi/*.msi
+            zhuiyi/src-tauri/target/release/bundle/nsis/*.exe
