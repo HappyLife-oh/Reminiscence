@@ -8,5 +8,6 @@ python-multipart==0.0.20
 jieba==0.42.1
 snownlp==0.12.3
 chardet==5.2.0
-chromadb==1.5.8
+numpy==2.0.2
 sentence-transformers==5.1.2
+pytest==8.4.2

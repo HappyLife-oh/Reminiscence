@@ -26,3 +26,6 @@ Thumbs.db
 # Python
 *.egg-info/
 .eggs/
+
+#plans
+*.plan

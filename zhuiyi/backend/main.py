@@ -8,9 +8,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from routers import chat, config as config_router, data_import, tts, avatar
+from routers import chat, config as config_router, data_import, tts, avatar, auth_router
 from services.llm_service import LLMService
 from services.config_service import ConfigService
+from database import init_db
 
 # 配置日志
 logging.basicConfig(
@@ -24,6 +25,9 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    # 初始化数据库
+    init_db()
+    
     config_service = ConfigService()
     llm_service = LLMService(config_service)
     app.state.config_service = config_service
@@ -60,6 +64,7 @@ app.include_router(config_router.router, prefix="/api/config", tags=["配置"])
 app.include_router(data_import.router, prefix="/api/data", tags=["数据导入"])
 app.include_router(tts.router, prefix="/api/tts", tags=["语音合成"])
 app.include_router(avatar.router, prefix="/api/avatar", tags=["数字人"])
+app.include_router(auth_router.router, prefix="/api/auth", tags=["认证"])
 
 
 @app.get("/")
