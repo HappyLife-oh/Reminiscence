@@ -2,6 +2,7 @@
 数据导入路由 - 处理数据上传和特征提取
 """
 
+import logging
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
@@ -14,6 +15,7 @@ from services.character_service import CharacterService
 from services.memory_service import MemoryService
 from services.prompt_service import PromptService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 初始化服务
@@ -54,9 +56,19 @@ async def import_text(
     导入文本数据（粘贴或上传文本内容）
     支持：TXT、CSV、JSON、自动检测
     """
+    if not content or not content.strip():
+        raise HTTPException(status_code=400, detail="内容不能为空")
+    if not character_name or not character_name.strip():
+        raise HTTPException(status_code=400, detail="人物名称不能为空")
+    if len(content) > 1_000_000:
+        raise HTTPException(status_code=400, detail="内容长度不能超过1MB")
+
     try:
-        # 解析消息
         msg_platform = MessagePlatform(platform)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"不支持的平台: {platform}")
+
+    try:
         messages = auto_parse(
             content,
             file_type=file_type if file_type != "auto" else None,
@@ -67,100 +79,14 @@ async def import_text(
         if not messages:
             raise HTTPException(status_code=400, detail="未能解析出任何消息，请检查数据格式")
 
-        # 创建人物档案
         profile = feature_extractor.extract_character_profile(
             messages=messages,
             character_name=character_name,
         )
 
-        # 保存人物档案
-        character_id = character_service.save_character(profile)
-
-        # 保存消息
-        character_service.save_messages(character_id, messages)
-
-        # 添加到记忆系统（RAG）
-        memory_count = memory_service.add_messages(character_id, messages)
-
-        # 生成并保存系统提示词（使用优化的PromptService）
-        system_prompt = prompt_service.generate_system_prompt(profile)
-        character_service.save_system_prompt(character_id, system_prompt)
-
-        return {
-            "status": "ok",
-            "character_id": character_id,
-            "character_name": character_name,
-            "message_count": len(messages),
-            "profile": profile.to_dict(),
-            "system_prompt": system_prompt,
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/import/file")
-async def import_file(
-    file: UploadFile = File(...),
-    character_name: str = Form(...),
-    file_type: str = Form("auto"),
-    platform: str = Form("manual"),
-    chat_name: str = Form(""),
-):
-    """
-    导入文件数据
-    支持：.txt, .csv, .json
-    """
-    # 检查文件类型
-    allowed_extensions = {".txt", ".csv", ".json", ".log"}
-    file_ext = "." + file.filename.split(".")[-1].lower() if "." in file.filename else ""
-
-    if file_ext not in allowed_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的文件格式: {file_ext}，支持: {', '.join(allowed_extensions)}"
-        )
-
-    try:
-        # 读取文件内容
-        content = await file.read()
-
-        # 自动检测编码
-        import chardet
-        detected = chardet.detect(content)
-        encoding = detected.get("encoding", "utf-8")
-
-        try:
-            text_content = content.decode(encoding)
-        except (UnicodeDecodeError, LookupError):
-            text_content = content.decode("utf-8", errors="replace")
-
-        # 确定文件类型
-        if file_type == "auto":
-            type_map = {".txt": "txt", ".csv": "csv", ".json": "json", ".log": "txt"}
-            file_type = type_map.get(file_ext, "txt")
-
-        # 解析消息
-        msg_platform = MessagePlatform(platform)
-        parser = get_parser(file_type)
-        messages = parser.parse(text_content, platform=msg_platform, chat_name=chat_name)
-
-        if not messages:
-            raise HTTPException(status_code=400, detail="未能从文件中解析出任何消息")
-
-        # 创建人物档案
-        profile = feature_extractor.extract_character_profile(
-            messages=messages,
-            character_name=character_name,
-        )
-
-        # 保存
         character_id = character_service.save_character(profile)
         character_service.save_messages(character_id, messages)
-        
-        # 添加到记忆系统（RAG）
         memory_service.add_messages(character_id, messages)
-        
         system_prompt = prompt_service.generate_system_prompt(profile)
         character_service.save_system_prompt(character_id, system_prompt)
 
@@ -176,7 +102,85 @@ async def import_file(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"数据导入失败: {e}")
+        raise HTTPException(status_code=500, detail="数据导入失败，请检查数据格式")
+
+
+@router.post("/import/file")
+async def import_file(
+    file: UploadFile = File(...),
+    character_name: str = Form(...),
+    file_type: str = Form("auto"),
+    platform: str = Form("manual"),
+    chat_name: str = Form(""),
+):
+    """
+    导入文件数据
+    支持：.txt, .csv, .json
+    """
+    allowed_extensions = {".txt", ".csv", ".json", ".log"}
+    file_ext = "." + file.filename.split(".")[-1].lower() if file.filename and "." in file.filename else ""
+
+    if file_ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的文件格式: {file_ext}，支持: {', '.join(allowed_extensions)}"
+        )
+
+    if not character_name or not character_name.strip():
+        raise HTTPException(status_code=400, detail="人物名称不能为空")
+
+    try:
+        content = await file.read()
+
+        if len(content) > 10_000_000:  # 10MB限制
+            raise HTTPException(status_code=400, detail="文件大小不能超过10MB")
+
+        import chardet
+        detected = chardet.detect(content)
+        encoding = detected.get("encoding", "utf-8")
+
+        try:
+            text_content = content.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            text_content = content.decode("utf-8", errors="replace")
+
+        if file_type == "auto":
+            type_map = {".txt": "txt", ".csv": "csv", ".json": "json", ".log": "txt"}
+            file_type = type_map.get(file_ext, "txt")
+
+        msg_platform = MessagePlatform(platform)
+        parser = get_parser(file_type)
+        messages = parser.parse(text_content, platform=msg_platform, chat_name=chat_name)
+
+        if not messages:
+            raise HTTPException(status_code=400, detail="未能从文件中解析出任何消息")
+
+        profile = feature_extractor.extract_character_profile(
+            messages=messages,
+            character_name=character_name,
+        )
+
+        character_id = character_service.save_character(profile)
+        character_service.save_messages(character_id, messages)
+        memory_service.add_messages(character_id, messages)
+        system_prompt = prompt_service.generate_system_prompt(profile)
+        character_service.save_system_prompt(character_id, system_prompt)
+
+        return {
+            "status": "ok",
+            "character_id": character_id,
+            "character_name": character_name,
+            "message_count": len(messages),
+            "profile": profile.to_dict(),
+            "system_prompt": system_prompt,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"文件导入失败: {e}")
+        raise HTTPException(status_code=500, detail="文件导入失败，请检查文件格式")
 
 
 @router.get("/characters")
@@ -214,10 +218,11 @@ async def get_character_prompt(character_id: str):
 @router.delete("/characters/{character_id}")
 async def delete_character(character_id: str):
     """删除人物（包括记忆数据）"""
-    # 删除记忆数据
-    memory_service.delete_memories(character_id)
-    # 删除人物档案
-    success = character_service.delete_character(character_id)
-    if not success:
+    # 先检查人物是否存在
+    profile = character_service.load_character(character_id)
+    if not profile:
         raise HTTPException(status_code=404, detail="人物不存在")
+
+    memory_service.delete_memories(character_id)
+    character_service.delete_character(character_id)
     return {"status": "ok", "message": "已删除"}
