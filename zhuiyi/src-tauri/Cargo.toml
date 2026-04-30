@@ -1,6 +1,6 @@
 [package]
 name = "zhuiyi"
-version = "1.0.0"
+version = "1.2.2"
 description = "追忆 - AI数字人系统"
 authors = ["you"]
 edition = "2021"
