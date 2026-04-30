@@ -7,19 +7,23 @@
 ## 核心特性
 
 - **语言风格克隆**：学习目标人物的说话习惯、用词偏好、表达方式
-- **声音克隆**：复刻目标人物的音色、语调、说话节奏
-- **数字人形象**：基于照片生成数字人视觉形象
-- **多API支持**：支持DeepSeek、OpenAI、通义千问、智谱GLM、Kimi等
+- **声音克隆**：基于MiMo TTS API复刻目标人物的音色
+- **数字人形象**：轻量级数字人，支持表情动画和唇形同步
+- **记忆系统**：ChromaDB向量数据库，RAG检索相关记忆
+- **Prompt工程**：分层Prompt设计，情感模拟，Few-shot示例
+- **多API支持**：MiMo/DeepSeek/OpenAI/通义千问/智谱GLM/Kimi
 - **零硬件门槛**：任何电脑都能运行
 
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
-| 前端 | Tauri 2.0 + React + TypeScript |
+| 前端 | Tauri 2.0 + React 19 + TypeScript |
 | 后端 | Python FastAPI |
-| 数据库 | ChromaDB + SQLite |
-| AI引擎 | 云端LLM API + GPT-SoVITS + SadTalker |
+| 向量数据库 | ChromaDB |
+| AI对话 | MiMo API (mimo-v2.5-pro) |
+| 语音合成 | MiMo TTS API |
+| 数字人 | 轻量级CSS动画 |
 
 ## 快速开始
 
@@ -31,18 +35,18 @@
 
 ### 1. 配置API密钥
 
-复制 `.env.example` 为 `.env`，填入你的API密钥：
-
 ```bash
 cd zhuiyi/backend
 cp .env.example .env
 ```
 
-编辑 `.env` 文件，至少配置一个API服务商的密钥：
+编辑 `.env` 文件，填入MiMo API密钥：
 
 ```env
-# 推荐使用DeepSeek（便宜且中文效果好）
-DEEPSEEK_API_KEY=your_api_key_here
+MIMO_API_KEY=your_api_key_here
+MIMO_BASE_URL=https://token-plan-cn.xiaomimimo.com/v1
+DEFAULT_PROVIDER=mimo
+DEFAULT_MODEL=mimo-v2.5-pro
 ```
 
 ### 2. 安装依赖
@@ -62,7 +66,6 @@ pip install -r requirements.txt
 **方式一：使用启动脚本（Windows）**
 
 ```bash
-# 双击运行
 zhuiyi/start.bat
 ```
 
@@ -88,32 +91,35 @@ npm run dev
 
 ```
 zhuiyi/
-├── src/                    # 前端React代码
-│   ├── App.tsx            # 主应用组件
-│   ├── App.css            # 样式文件
-│   └── main.tsx           # 入口文件
-├── src-tauri/             # Tauri后端（Rust）
-│   ├── src/
-│   │   ├── main.rs        # Rust入口
-│   │   └── lib.rs         # Tauri命令
-│   ├── Cargo.toml         # Rust依赖
-│   └── tauri.conf.json    # Tauri配置
-├── backend/               # Python后端
-│   ├── main.py            # FastAPI入口
-│   ├── routers/           # API路由
-│   │   ├── chat.py        # 聊天接口
-│   │   └── config.py      # 配置接口
-│   ├── services/          # 业务服务
-│   │   ├── llm_service.py # LLM调用服务
-│   │   └── config_service.py # 配置服务
-│   ├── requirements.txt   # Python依赖
-│   └── .env.example       # 环境变量模板
-├── plans/                 # 项目规划文档
-│   └── 追忆-项目规划.md
-├── package.json           # 前端依赖
-├── vite.config.ts         # Vite配置
-├── tsconfig.json          # TypeScript配置
-└── start.bat              # Windows启动脚本
+├── src/                          # 前端 React
+│   ├── App.tsx                   # 主应用
+│   ├── App.css                   # 样式
+│   └── main.tsx                  # 入口
+├── src-tauri/                    # Tauri 后端
+├── backend/                      # Python 后端
+│   ├── main.py                   # FastAPI 入口
+│   ├── .env                      # API 配置
+│   ├── models/
+│   │   └── data_models.py        # 数据模型
+│   ├── routers/
+│   │   ├── chat.py               # 聊天 API
+│   │   ├── config.py             # 配置 API
+│   │   ├── data_import.py        # 数据导入 API
+│   │   ├── tts.py                # 语音合成 API
+│   │   └── avatar.py             # 数字人 API
+│   └── services/
+│       ├── llm_service.py        # LLM 调用服务
+│       ├── config_service.py     # 配置管理
+│       ├── data_parser.py        # 数据解析器
+│       ├── feature_extractor.py  # 特征提取
+│       ├── character_service.py  # 人物管理
+│       ├── memory_service.py     # 记忆系统（RAG）
+│       ├── prompt_service.py     # Prompt 工程
+│       ├── tts_service.py        # TTS 语音合成
+│       └── avatar_service.py     # 数字人服务
+├── plans/                        # 项目规划文档
+├── start.bat                     # Windows 启动脚本
+└── README.md
 ```
 
 ## API接口
@@ -124,47 +130,70 @@ zhuiyi/
 # 流式聊天
 curl -X POST http://localhost:8000/api/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{
-    "messages": [{"role": "user", "content": "你好"}],
-    "provider": "deepseek",
-    "stream": true
-  }'
+  -d '{"messages": [{"role": "user", "content": "你好"}], "provider": "mimo", "stream": true}'
 
-# 获取可用服务商
-curl http://localhost:8000/api/chat/providers
+# 带人物档案的聊天
+curl -X POST http://localhost:8000/api/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "你好"}], "character_id": "char_xxx", "stream": true}'
 ```
 
-### 配置接口
+### 数据导入接口
 
 ```bash
-# 获取所有服务商
-curl http://localhost:8000/api/config/providers
+# 文件导入
+curl -X POST http://localhost:8000/api/data/import/file \
+  -F "file=@chat.txt" -F "character_name=小明" -F "file_type=txt"
 
-# 更新服务商配置
-curl -X POST http://localhost:8000/api/config/providers/deepseek \
+# 文本导入
+curl -X POST http://localhost:8000/api/data/import/text \
+  -F "content=..." -F "character_name=小明" -F "file_type=txt"
+```
+
+### 语音合成接口
+
+```bash
+# 文本转语音
+curl -X POST http://localhost:8000/api/tts/synthesize \
   -H "Content-Type: application/json" \
-  -d '{"name": "deepseek", "api_key": "your_key", "base_url": "https://api.deepseek.com"}'
+  -d '{"text": "你好", "model": "tts"}' --output speech.mp3
+
+# 声音克隆
+curl -X POST http://localhost:8000/api/tts/voice-clone \
+  -F "audio=@reference.mp3" -F "text=你好" --output cloned.mp3
+```
+
+### 数字人接口
+
+```bash
+# 获取数字人状态
+curl http://localhost:8000/api/avatar/{character_id}/state?emotion=joy
+
+# 上传头像
+curl -X POST http://localhost:8000/api/avatar/{character_id}/image \
+  -F "image=@avatar.png"
 ```
 
 ## 支持的API服务商
 
-| 服务商 | 特点 | 价格 | 推荐场景 |
-|--------|------|------|----------|
-| DeepSeek | 便宜、中文好 | ¥1/百万token | 日常使用首选 |
-| OpenAI | 效果最好 | $2.5/百万token | 追求最佳效果 |
-| 通义千问 | 稳定、国内服务 | ¥2/百万token | 稳定性要求高 |
-| 智谱GLM | 中文优化 | ¥5/百万token | 中文场景 |
-| Kimi | 长文本支持 | ¥1/百万token | 长对话场景 |
+| 服务商 | 特点 | 价格 |
+|--------|------|------|
+| **MiMo** | 对话+TTS+声音克隆 | 按量计费 |
+| **DeepSeek** | 便宜、中文好 | ¥1/百万token |
+| **OpenAI** | 效果最好 | $2.5/百万token |
+| **通义千问** | 稳定、国内服务 | ¥2/百万token |
+| **智谱GLM** | 中文优化 | ¥5/百万token |
+| **Kimi** | 长文本支持 | ¥1/百万token |
 
 ## 开发阶段
 
 - [x] 阶段一：项目基础搭建
-- [ ] 阶段二：数据处理与特征提取
-- [ ] 阶段三：记忆系统与RAG
-- [ ] 阶段四：Prompt工程优化
-- [ ] 阶段五：声音克隆（轻量版）
-- [ ] 阶段六：数字人（轻量版）
-- [ ] 阶段七：系统集成与优化
+- [x] 阶段二：数据处理与特征提取
+- [x] 阶段三：记忆系统与RAG
+- [x] 阶段四：Prompt工程优化
+- [x] 阶段五：声音克隆（MiMo TTS）
+- [x] 阶段六：数字人（轻量版）
+- [x] 阶段七：系统集成与优化
 
 ## 许可证
 
