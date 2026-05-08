@@ -4,6 +4,7 @@
 """
 
 import logging
+import os
 import uuid
 import hashlib
 import hmac
@@ -18,8 +19,9 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# 配置
-SECRET_KEY = "zhuiyi-secret-key-change-in-production"
+# 配置 — JWT密钥从环境变量读取，无需手动配置
+# 如需自定义，在 .env 中设置 JWT_SECRET_KEY
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "zhuiyi-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 

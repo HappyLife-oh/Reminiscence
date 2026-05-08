@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:8000 ws://localhost:1420; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
     }
   },
   "bundle": {
